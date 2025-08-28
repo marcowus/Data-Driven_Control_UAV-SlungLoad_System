@@ -4,6 +4,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from sklearn.base import BaseEstimator
 
+from .backstepping_inner_loop import backstepping_inner_loop
+from .hexacopter_model import hexacopter_model
+
 # ============================================================
 # Van der Pol plant dynamics for demonstration
 # ============================================================
@@ -106,15 +109,49 @@ class ImprovedBacksteppingController:
         self.alpha = 0.95
         self.K_linear = np.array([10.0, 5.0])
 
+        # Gains for translational outer-loop used with the hexacopter model
+        self.Kp_pos = np.diag([4.0, 4.0, 4.0])
+        self.Kd_pos = np.diag([2.0, 2.0, 2.0])
+
     def bind_koopman(self, koopman_model):
-        if not hasattr(koopman_model, 'lift'):
-            raise ValueError('Invalid Koopman model provided')
+        if not hasattr(koopman_model, "lift"):
+            raise ValueError("Invalid Koopman model provided")
         self.koopman = koopman_model
 
-    def compute_control(self, x, t, dt):
+    def compute_vdp_control(self, x, t, dt):
         if t >= self.alpha * self.Tp:
             return self.linear_control(x)
         return self.time_varying_control(x, t, dt)
+
+    def compute_control(self, q, q_dot, q_ddot, q_r, q_r_dot, q_r_ddot):
+        """Return full 6-D control vector for ``hexacopter_model``.
+
+        Parameters
+        ----------
+        q, q_dot, q_ddot : array_like, shape (8,)
+            Current state, its first and second derivative.
+        q_r, q_r_dot, q_r_ddot : array_like, shape (8,)
+            Reference state and derivatives.
+
+        Returns
+        -------
+        tau : ndarray, shape (6,)
+            [tau_x, tau_y, tau_z, tau_psi, tau_theta, tau_phi]
+        """
+
+        # Outer-loop for translational dynamics (tau_x, tau_y, tau_z)
+        e_pos = q_r[0:3] - q[0:3]
+        e_vel = q_r_dot[0:3] - q_dot[0:3]
+        thrust_cmd = (
+            q_r_ddot[0:3]
+            + self.Kd_pos.dot(e_vel)
+            + self.Kp_pos.dot(e_pos)
+        )
+
+        # Inner-loop for attitude using backstepping_inner_loop (tau_psi, tau_theta, tau_phi)
+        torque_cmd = backstepping_inner_loop(q_r, q_r_dot, q_r_ddot, q, q_dot, q_ddot)
+
+        return np.concatenate([thrust_cmd, torque_cmd])
 
     def time_varying_control(self, x, t, dt):
         x1, x2 = x
@@ -135,6 +172,20 @@ class ImprovedBacksteppingController:
         return np.clip(u, -10, 10)
 
 
+def hexacopter_step(controller, q, q_dot, q_ddot, q_r, q_r_dot, q_r_ddot, dt):
+    """Propagate one step of the hexacopter dynamics.
+
+    This utility demonstrates how the controller output is combined with
+    the thrust commands and fed to :func:`hexacopter_model`.
+    """
+
+    tau = controller.compute_control(q, q_dot, q_ddot, q_r, q_r_dot, q_r_ddot)
+    qdd, u1 = hexacopter_model(q, q_dot, tau)
+    q_dot_next = q_dot + qdd * dt
+    q_next = q + q_dot_next * dt
+    return q_next, q_dot_next, tau, u1
+
+
 # ============================================================
 # Simulation harness
 # ============================================================
@@ -151,7 +202,7 @@ def run_simulation(system_params, initial_state, koopman_model, simulation_time=
         'theta_hat': np.zeros(len(t)),
     }
     for i, current_time in enumerate(t):
-        u = controller.compute_control(x, current_time, system_params['dt'])
+        u = controller.compute_vdp_control(x, current_time, system_params['dt'])
         dx = plant_dynamics_vdp(current_time, x, u, system_params['theta_true'])
         x += dx * system_params['dt']
         log['states'][i] = x
