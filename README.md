@@ -75,10 +75,39 @@ The system parameters have been referenced from [MDPI Mathematics 9(15):1822](ht
 
 This repository contains two folders:
 
-- **Data-Driven Adaptive Control**  
-- **Data-Driven Sliding Model Predictive Control**  
+- **Data-Driven Adaptive Control**
+- **Data-Driven Sliding Model Predictive Control**
 
 Each folder contains the MATLAB scripts and functions necessary to simulate the respective control approach.
+
+### Python reimplementation
+
+The repository also includes a lightweight Python package (`python/`) that mirrors the MATLAB
+controllers using `numpy` and `casadi`:
+
+- `hexacopter_model.py` – dynamic model of the UAV and load
+- `backstepping_inner_loop.py` – attitude control via backstepping
+- `adaptive_controller.py` – data‑driven adaptive outer loop
+- `smpc_controller.py` – sliding model predictive controller
+- `koopman_backstepping.py` – Koopman‑based prescribed‑time backstepping demo
+
+To run a short simulation of the adaptive controller:
+
+```bash
+python -m python.adaptive_controller
+```
+
+To execute the SMPC example (requires `casadi`):
+
+```bash
+python -m python.smpc_controller
+```
+
+To try the Koopman‑based backstepping example:
+
+```bash
+python -m python.koopman_backstepping
+```
 
 ---
 ## How to Use
